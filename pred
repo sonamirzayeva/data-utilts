@@ -1,0 +1,24 @@
+import numpy as np
+from keras.layers import Input, Dense, Flatten, TimeDistributed
+from keras.models import Model
+
+# assume input_shape = (num_channels, im_height, im_width)
+input_shape = (3, 128, 160)
+stack_sizes = (input_shape[0], 48, 96, 192)
+R_stack_sizes = stack_sizes
+A_filt_sizes = (3, 3, 3)
+Ahat_filt_sizes = (3, 3, 3, 3)
+R_filt_sizes = (3, 3, 3, 3)
+layer_loss_weights = np.array([1., 0., 0., 0.])
+time_loss_weights = 1./ (nt - 1) * np.ones(nt)
+time_loss_weights[0] = 0
+
+# Define model
+inputs = Input(shape=(nt,) + input_shape)
+errors = prednet(inputs)  # errors will be (batch_size, nt, nb_layers)
+errors_by_time = TimeDistributed(Dense(1, weights=[layer_loss_weights, np.zeros(1)], trainable=False), trainable=False)(errors)  # calculate weighted error by layer
+errors_by_time = TimeDistributed(Dense(1, trainable=False), weights=[layer_loss_weights, np.zeros(1)], trainable=False)(errors)  # calculate weighted error by layer
+errors_by_time = Flatten()(errors_by_time)  # will be (batch_size, nt)
+final_errors = Dense(1, weights=[time_loss_weights, np.zeros(1)], trainable=False)(errors_by_time)  # weight errors by time and sum
+model = Model(input=inputs, output=final_errors)
+model.compile(loss='mean_absolute_error', optimizer='adam')
