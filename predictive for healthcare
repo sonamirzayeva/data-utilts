@@ -1,0 +1,54 @@
+if options['embFineTune']: emb = T.dot(x, tparams['W_emb'])
+	else: emb = T.dot(x, W_emb)
+
+	if keep_prob_emb > 0.0: emb = dropout_layer(emb, use_noise, trng, keep_prob_emb)
+	if keep_prob_emb < 1.0: emb = dropout_layer(emb, use_noise, trng, keep_prob_emb)
+
+	if useTime: temb = T.concatenate([emb, t.reshape([n_timesteps,n_samples,1])], axis=2) #Adding the time element to the embedding
+	else: temb = emb
+@@ -154,7 +154,7 @@ def attentionStep(att_timesteps):
+
+	counts = T.arange(n_timesteps)+ 1
+	c_t, updates = theano.scan(fn=attentionStep, sequences=[counts], outputs_info=None, name='attention_layer', n_steps=n_timesteps)
+	c_t = dropout_layer(c_t, use_noise, trng, keep_prob_context)
+        if keep_prob_context < 1.0: c_t = dropout_layer(c_t, use_noise, trng, keep_prob_context)
+
+	preY = T.nnet.sigmoid(T.dot(c_t, tparams['w_output']) + tparams['b_output'])
+	preY = preY.reshape((preY.shape[0], preY.shape[1]))
+    @@ -37,10 +37,6 @@ def init_tparams(params, options):
+		tparams[key] = theano.shared(value, name=key)
+	return tparams
+
+def dropout_layer(state_before, use_noise, trng, dropout_rate=0.5):
+	proj = T.switch(use_noise, (state_before * trng.binomial(state_before.shape, p=dropout_rate, n=1, dtype=state_before.dtype)), state_before * 0.5)
+	return proj
+
+def _slice(_x, n, dim):
+	if _x.ndim == 3:
+		return _x[:, :, n*dim:(n+1)*dim]
+@@ -78,7 +74,7 @@ def build_model(tparams, options):
+	preAlpha = preAlpha.reshape((preAlpha.shape[0], preAlpha.shape[1]))
+	alpha = (T.nnet.softmax(preAlpha.T)).T
+
+	beta = T.nnet.sigmoid(T.dot(reverse_h_b, tparams['W_beta']) + tparams['b_beta'])
+	beta = T.tanh(T.dot(reverse_h_b, tparams['W_beta']) + tparams['b_beta'])
+
+	return x, alpha, beta
+
+@@ -249,7 +245,7 @@ def train_RETAIN(
+
+		n_timesteps = x.shape[0]
+		n_samples = x.shape[1]
+		emb = np.dot(x, params['W_emb']) * 0.5
+		emb = np.dot(x, params['W_emb'])
+
+		if useTime:
+			temb = np.concatenate([emb, t.reshape((n_timesteps,n_samples,1))], axis=2)
+@@ -261,7 +257,6 @@ def train_RETAIN(
+		beta = beta[:,0,:]
+
+		ct = (alpha[:,None] * beta * emb[:,0,:]).sum(axis=0)
+		ct = ct * 0.5
+		y_t = sigmoid(np.dot(ct, params['w_output']) + params['b_output'])
+
+		buf = ''
