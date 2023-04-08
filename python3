@@ -1,0 +1,109 @@
+class SequenceGenerator(Sequence):
+    def __init__(self, data_file, source_file, nt, batch_size=8, shuffle=False, seed=None,
+                 output_mode='error', sequence_start_mode='all', N_seq=None,
+                 dim_ordering=K.image_dim_ordering(), data_format=K.image_data_format()):
+        self.X = hkl.load(data_file)  # X will be like (n_images, nb_cols, nb_rows, nb_channels)
+        self.sources = hkl.load(source_file) # source for each image so when creating sequences can assure that consecutive frames are from same video
+        self.nt = nt
+        self.batch_size = batch_size
+        self.dim_ordering = dim_ordering
+        self.data_format = data_format
+        assert sequence_start_mode in {'all', 'unique'}, 'sequence_start_mode must be in {all, unique}'
+        self.sequence_start_mode = sequence_start_mode
+        assert output_mode in {'error', 'prediction'}, 'output_mode must be in {error, prediction}'
+        self.output_mode = output_mode
+
+        if self.dim_ordering == 'th' and self.data_format == 'channels_first':
+            self.X = np.transpose(self.X, (0, 3, 1, 2))
+        self.im_shape = self.X[0].shape
+
+        if self.sequence_start_mode == 'all':
+            self.possible_starts = np.arange(len(self.X) - self.nt + 1)
+        elif self.sequence_start_mode == 'unique':
+            self.possible_starts = np.array(
+                [i for i in range(len(self.X) - self.nt + 1) if self.sources[i] != self.sources[i + self.nt - 1]])
+        if N_seq:
+            self.possible_starts = self.possible_starts[:N_seq]
+        self.N_sequences = len(self.possible_starts)
+        super().__init__(len(self.possible_starts), batch_size, shuffle, seed)
+
+    def __getitem__(self, null):
+        return self.next()
+
+    def next(self):
+        with self.lock:
+            current_index = (self.batch_index * self.batch_size) % self.n
+            index_array, current_batch_size = next(self.index_generator), self.batch_size
+        batch_x = np.zeros((current_batch_size, self.nt) + self.im_shape, np.float32)
+        for i, idx in enumerate(index_array):
+            idx = self.possible_starts[idx]
+            if self.dim_ordering == 'th':
+                im = self.X[idx:idx + self.nt].transpose((0, 3, 1, 2))
+            else:
+                im = self.X[idx:idx + self.nt]
+            batch_x[i] = im
+        if self.output_mode == 'error':
+            batch_y = batch_x[:, ::-1] - batch_x
+            batch_y = batch_y[:, 1:]
+        elif self.output_mode == 'prediction':
+            batch_y = batch_x[:, -1]
+        else:
+            raise ValueError("Output mode must be 'error' or 'prediction'.")
+        return batch_x, batch_y
+        
+        
+        import os
+import requests
+import numpy as np
+import cv2
+import hickle as hkl
+from bs4 import BeautifulSoup
+from kitti_settings import *
+
+def download_data():
+    base_url = "https://s3.eu-central-1.amazonaws.com/avg-kitti/raw_data/"
+    for c in categories:
+        print(f"Downloading set: {c}")
+        c_dir = os.path.join(DATA_DIR, "raw", c)
+        os.makedirs(c_dir, exist_ok=True)
+        url = base_url + f"{c}/{c}_sync.zip"
+        r = requests.get(url)
+        with open(os.path.join(c_dir, f"{c}_sync.zip"), "wb") as f:
+            f.write(r.content)
+
+def extract_data():
+    for c in categories:
+        print(f"Extracting set: {c}")
+        c_dir = os.path.join(DATA_DIR, "raw", c)
+        _, _, zip_files = next(os.walk(c_dir))
+        for f in zip_files:
+            spec_folder = f"{f[:10]}/{f[:-4]}/image_03/data*"
+            command = f"unzip -qq {os.path.join(c_dir, f)} {spec_folder} -d {os.path.join(c_dir, f[:-4])}"
+            os.system(command)
+
+def process_data():
+    splits = read_splits()
+    not_train = splits["val"] + splits["test"]
+    for c in categories:
+        c_dir = os.path.join(DATA_DIR, "raw", c)
+        _, folders, _ = next(os.walk(c_dir))
+        folders = [f for f in folders if (c, f) not in not_train]
+        splits["train"] += [(c, f) for f in folders]
+
+    for split in splits:
+        im_list = []
+        source_list = []
+        for category, folder in splits[split]:
+            im_dir = os.path.join(DATA_DIR, "raw", category, folder, folder[:10], folder, "image_03", "data")
+            files = sorted(os.listdir(im_dir))
+            im_list += [os.path.join(im_dir, f) for f in files]
+            source_list += [f"{category}-{folder}"] * len(files)
+
+        print(f"Creating {split} data: {len(im_list)} images")
+        X = np.zeros((len(im_list),) + desired_im_sz + (3,), np.uint8)
+        for i, im_file in enumerate(im_list):
+            im = cv2.imread(im_file)
+            im = cv2.resize(im, desired_im_sz[::-1])
+            X[i] = im
+        hkl.dump(X, os.path.join(DATA_DIR, f"{split}_data.hkl"))
+        hkl.dump(source_list, os.path.join(DATA_DIR, f"{split}_sources.hkl"))
