@@ -1,0 +1,74 @@
+class DataGenerator:
+    def __init__(self, data_file, source_file, nt,
+                 batch_size=8, shuffle=False, seed=None,
+                 output_mode='error', sequence_start_mode='all', N_seq=None,
+                 dim_ordering=K.image_dim_ordering(),
+                 data_format=K.image_data_format()):
+        self.X = hkl.load(data_file)  # X will be like (n_images, nb_cols, nb_rows, nb_channels)
+        self.sources = hkl.load(source_file) # source for each image so when creating sequences can assure that consecutive frames are from same video
+        self.nt = nt
+        self.batch_size = batch_size
+        self.dim_ordering = dim_ordering
+        self.data_format = data_format
+        self.sequence_start_mode = sequence_start_mode
+        self.output_mode = output_mode
+        self.N_seq = N_seq
+        self.shuffle = shuffle
+        self.seed = seed
+        self.nb_images = self.X.shape[0]
+        self.im_shape = self.X[0].shape
+
+        if self.dim_ordering == 'th' and self.data_format == 'channels_first':
+            self.X = np.transpose(self.X, (0, 3, 1, 2))
+
+        if self.sequence_start_mode == 'unique':
+            if self.N_seq is None:
+                self.N_seq = int(self.nb_images/self.nt)
+            self.nb_sequences = self.N_seq * self.batch_size
+        else:
+            self.nb_sequences = int(self.nb_images/self.nt) * self.batch_size
+
+        self.indexes = np.arange(self.nb_images)
+        self.start_indexes = self.get_start_indexes()
+
+    def get_start_indexes(self):
+        if self.sequence_start_mode == 'unique':
+            start_indexes = np.zeros(self.N_seq)
+            for i in range(self.N_seq):
+                start_indexes[i] = i*self.nt
+        else:
+            start_indexes = np.arange(0, self.nb_images, self.nt)
+
+        if self.shuffle:
+            np.random.seed(self.seed)
+            np.random.shuffle(start_indexes)
+
+        return start_indexes
+
+    def generate(self):
+        while True:
+            if self.shuffle:
+                np.random.seed(self.seed)
+                np.random.shuffle(self.indexes)
+
+            for i in range(self.nb_sequences):
+                if self.sequence_start_mode == 'unique':
+                    index = self.indexes[self.start_indexes[i % self.N_seq]:self.start_indexes[i % self.N_seq]+self.nt]
+                else:
+                    index = self.indexes[self.start_indexes[i]:self.start_indexes[i]+self.nt]
+
+                # If there are not enough frames left in the sequence to make a batch, skip it
+                if len(index) < self.batch_size*self.nt:
+                    continue
+
+                # Create X_batch and y_batch
+                X_batch = np.zeros((self.batch_size, self.nt) + self.im_shape)
+                y_batch = np.zeros((self.batch_size, self.nt) + self.im_shape)
+                for j in range(self.batch_size):
+                    X_batch[j] = self.X[index[j*self.nt:(j+1)*self.nt]]
+                    if self.output_mode == 'error':
+                        y_batch[j] = self.X[index[j*self.nt]+1:index[(j+1)*self.nt]]
+                    else:
+                        y_batch[j] = self.X[index[j*self.nt]:index[(j+1)*self.nt]]
+
+                yield X_batch, y_batch
