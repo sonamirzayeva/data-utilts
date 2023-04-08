@@ -1,0 +1,418 @@
+from string import punctuation
+from numpy.random import choice
+import json
+
+class MarkovChain(object):
+    """
+    Class of the Python implementation of the markov chain
+    chain is a dictionary that represents the markov chain
+    the keys of the chain are the states, i.e. words
+    the values are also dictionaries that represent the next state
+    the value of chain is a dictionary with key the next state (word)
+    and value the number of times this transaction has occured
+    """
+
+    def __init__(self, order, chain={}):
+        self.chain = chain 
+        self.order = order
+
+    def train(self, filename):
+        """
+        Given a file containing corpora, retrieves data-words from the input
+        and updates the markov chain accordingly.
+        Input files can be books from NLTK Gutenberg, text files, or even
+        user input.
+        To train the markov chain with user input, the text typed from the 
+        user is saved to a file and given to this method as argument.
+        Inpute: a string of the filenamefrom tkinter import *
+        Return: nada
+        """
+        words = self.get_input_fron_file(filename)
+        self.update_Markov_chain(words)
+
+    def get_input_fron_file(self,filename):
+        """
+        Given a filename, opens the corresponding file to read it and return a
+        list of the words in it, in the appropriate form (no punctiuation,
+        capitals, etc). This list of words will be used to train the markov 
+        chain
+        Input: a string of the filename
+        Return: a list of words
+        """
+        words = [] 
+        with open(filename) as f:        
+            for word in f.read().split():
+                pure_word = self.strip_punctuation(word)
+                words.append(pure_word.lower())
+        return words
+
+    def strip_punctuation(self,s):
+        """
+        Given a string s, strips away all punctuation marks
+        Input: a string s
+        Return: a string 
+        """
+        return ''.join(c for c in s if c not in punctuation)
+
+    def update_Markov_chain(self, words):
+        """
+        Given a corpora of text, in the form of a list of words, greates states 
+        in the chain for newly encountered words and updates the statistics.
+        Whenever a 'word' followed by 'next_word' occurs in the corporam the 
+        counter for next_state being the 'next_word' is incremented.
+        For a higher order chain the state is a tuple of no. of order words
+        Input : a list of words for trainign corpora, order of chain
+        Return : nada
+        """
+
+        index = 0
+        for word in words[:len(words)-self.order-1]:
+            state = ' '.join(words[index:index + self.order+1])
+            next_state = words[index + self.order + 1] 
+            index += 1 
+
+            if state not in self.chain:
+                self.chain[state] = {}
+
+            if next_state not in self.chain[state]:
+                self.chain[state][next_state] = 0
+
+            self.chain[state][next_state] += 1
+
+
+
+    def find_next_state(self,state):
+        """
+        Given a state find the next state at random
+        """
+
+        state = self.strip_punctuation(state)
+        if state not in self.chain.keys():
+            # word has never been encountered in training
+            return None
+        else:            
+            choices = list(self.chain[state].keys())
+            weights = list(self.chain[state].values())
+            # find propabilities from weights
+            sum = self.calc_sum(weights)
+            # -Debug- print(sum)
+            prob = []
+            for w in weights:
+                prob.append(float(w)/sum)
+            # -Debug- print(prob)
+            return choice(choices,p=prob)
+
+    def calc_sum(self,listarray):
+        """
+        Calculates the sum of the elements of a list
+        Input: a list of numbers
+        Return type: a float number
+        """
+
+        sum = 0.0
+        for x in listarray:
+            sum += x
+        return sum
+
+    # JSON methods
+
+    def to_json(self, filename):
+        """
+        Converts the trained markov chain to a json object and stores it to a
+        file for future use
+        """
+
+        with open(filename,'w') as f:
+            json.dump(self.to_json_serializible(),f)
+
+    def to_json_serializible(self):
+        """
+        Converts a MarkovChain object to a dictionary to be used from json
+        """
+
+        return {
+                "order":self.order,
+                "markov_chain":json.dumps(self.chain, sort_keys=True)
+                }
+
+    @classmethod
+    def from_json(cls, filename):
+        """
+        Converts a json file containing the markov chain back to a MarkovChain 
+        object to use 
+        """
+
+        with open(filename) as f:
+            data = json.load(f)
+        order = data['order']
+        chain = json.loads(data['markov_chain'])
+        obtained_chain = cls(order,chain)        
+        return obtained_chain
+
+ 20  
+retest.py
+@@ -0,0 +1,20 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Feb 22 18:24:21 2018
+@author: Apostolidou Maria
+Description: Test 
+             Loads Markov Chain from .json and tests method find_next_state
+"""
+from chain import MarkovChain
+
+new_chain = MarkovChain.from_json('markov_chain_1st_order.json')
+print(new_chain.find_next_state('it'))
+
+new_chain2 = MarkovChain.from_json('markov_chain_2nd_order.json')
+print(new_chain2.find_next_state('it was'))
+
+new_chain3 = MarkovChain.from_json('markov_chain_3rd_order.json')
+print(new_chain3.find_next_state('it was a'))
+ 50  
+train1storder.py
+@@ -0,0 +1,50 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Feb 18 19:37:43 2018
+@author: Apostolidou Maria
+Description: Training module of 1st order Markov Chain
+             using nltk corpora from project gutenberg
+             
+Important: To use you need to download nltk and change the path accordingly, 
+           to find the nltk_date/corpora/gutenberg folder on your computer.
+           To train the markov chain, any text file can be used.
+           To create and train a markov chain with a text file example.txt
+           run:
+               mc = MarkovChain(0)
+               mc.train('example.txt')
+"""
+from chain import MarkovChain
+from nltk.corpus import gutenberg
+
+
+# creating the chain 
+# 1st order -> 0
+mc = MarkovChain(0)
+
+# train
+# download nltk and change path accordingly
+# any text file can be used to train the chain
+corpora_path = '/usr/local/share/nltk_data/corpora/gutenberg/'
+
+for filename in gutenberg.fileids():
+    print(corpora_path+str(filename))
+    try:
+        mc.train(corpora_path+str(filename))
+    except (UnicodeDecodeError):
+        pass
+
+
+# testing
+# print(mc.chain)
+# print(mc.find_next_state('it')) #first order
+# print(mc.find_next_state('gain'))
+
+
+# convert to json and save to file
+mc.to_json('markov_chain_1st_order.json')
+
+
+
+ 45  
+train2ndorder.py
+@@ -0,0 +1,45 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Feb 19 19:06:15 2018
+@author: Apostolidou Maria
+Description: training module of 2nd order Markov Chain
+             using nltk corpora from project gutenberg
+             
+Important: To use you need to download nltk and change the path accordingly, 
+           to find the nltk_date/corpora/gutenberg folder on your computer.
+           To train the markov chain, any text file can be used.
+           To create and train a markov chain with a text file example.txt
+           run:
+               mc = MarkovChain(1)
+               mc.train('example.txt')
+"""
+
+from chain import MarkovChain
+from nltk.corpus import gutenberg
+
+
+# creating the chain
+# 2nd order -> 0
+mc = MarkovChain(1)
+
+# train
+# download nltk and change path accordingly
+# any text file can be used to train the chain
+corpora_path = '/usr/local/share/nltk_data/corpora/gutenberg/'
+
+for filename in gutenberg.fileids():
+    print(corpora_path+str(filename))
+    try:
+        mc.train(corpora_path+str(filename))
+    except (UnicodeDecodeError):
+        pass
+
+# testing    
+# print(mc.chain)
+# print(mc.find_next_state('it was')) #second order
+
+# convert to json and save to file
+mc.to_json('markov_chain_2nd_order.json')
+ 44
+
+
+           To create and train a markov chain with a text file example.txt
+           run:
+               mc = MarkovChain(2)
+               mc.train('example.txt')
+"""
+from chain import MarkovChain
+from nltk.corpus import gutenberg
+
+
+# creating the chain 
+# 3rd order -> 2
+mc = MarkovChain(2)
+
+# train
+# download nltk and change path accordingly
+# any text file can be used to train the chain
+corpora_path = '/usr/local/share/nltk_data/corpora/gutenberg/'
+
+for filename in gutenberg.fileids():
+    print(corpora_path+str(filename))
+    try:
+        mc.train(corpora_path+str(filename))
+    except (UnicodeDecodeError):
+        pass
+
+# testing...
+# print(mc.chain)
+# print(mc.find_next_state('it was a')) #third order
+
+# convert to json and save to file
+mc.to_json('markov_chain_3rd_order.json')
+ 117  
+user.py
+@@ -0,0 +1,117 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+
+
+"""
+
+from chain import MarkovChain
+import sys
+
+def load_markov_chain(order):
+    """
+    Loads the trained markov chain
+    """
+    if order == "1":
+        try:
+            new_chain = MarkovChain.from_json('markov_chain_1st_order.json')
+            print("loaded ok")
+            return new_chain
+        except (FileNotFoundError):
+            print("Couldn't load the Markov Chain. File does not exist.")
+            print("First train a Markov Chain and save it to a json file.")
+            print("(see train1storder.py ) ")
+            sys.exit(0)
+    elif order == "2":
+        try:
+            new_chain = MarkovChain.from_json('markov_chain_2nd_order.json')
+            print("loaded ok")
+            return new_chain
+        except (FileNotFoundError):
+            print("Couldn't load the Markov Chain. File does not exist.")
+            print("First train a Markov Chain and save it to a json file.")
+            print("(see train2ndorder.py )")
+            sys.exit(0)
+    elif order == "3":
+        try:
+            new_chain = MarkovChain.from_json('markov_chain_3rd_order.json')
+            print("loaded ok")
+            return new_chain
+        except (FileNotFoundError):
+            print("Couldn't load the Markov Chain. File does not exist.")
+            print("First train a Markov Chain and save it to a json file.")
+            print("(see train3rdorder.py )")
+            sys.exit(0)
+    else:
+        print("Wrong Input")
+
+def predict_next_word(state, chain, order):
+    """
+    Predicts the next word that will be typed.
+    Input: string -> word or words that the user typed.
+           the words that the user typed determine the current state at the
+           chain. For a first order markov chain just the last word the user 
+           typed is considered. For a second order markov chain the last two 
+           words the user typed are considered etc.
+           chain -> markov chain object 
+    Return: string -> predicted word
+    """
+    if order == "1":
+        print("... " + state[-1] + " ...")
+        prediction = chain.find_next_state(state[-1])
+        return prediction
+    elif order == "2":
+        print("... " + " ".join(state[-2:]) + " ...")
+        prediction = chain.find_next_state(" ".join(state[-2:]))
+        return prediction
+    elif order == "3":
+        print("... " + " ".join(state[-3:]) + " ...")
+        prediction = chain.find_next_state(" ".join(state[-3:]))
+        return prediction
+    else:
+        print("Something went wrong. Prediction failed")
+
+
+
+# user's input
+typed = []
+quit = False
+
+order = input("Choose markov chain order (1,2,3) :")
+
+chain = load_markov_chain(order)
+print("--------------------------------------------------------")
+print("Type below")
+print("Your input must be at least {num} words".format(num=order))
+print("When you want to get a next word prediction press Enter")
+print("--------------------------------------------------------")
+
+## taking user input
+while quit == False:
+    print("\n(To exit press q)")
+    word = input("Type here --> ").split()
+    typed.extend(word[:])
+    if typed[-1] == 'q':
+        quit = True
+        break
+    else:
+        next_word = predict_next_word(typed,chain,order)
+        print("Prediction :    {nw}".format(nw = next_word))
+
+# exiting
+save = input("Do you wish to save your input? (y/n) ")
+if save in ['y', 'yes', 'YES', 'Y']:
+    with open("user_input.txt","w") as f:
+        f.write(' '.join(typed[:-1])) #exclude q 
+
+retrain = input("Do you wish to retrain the chain with your input? (y/n) ")
+if retrain in ['y', 'yes', 'YES', 'Y']:
+    try: 
+        chain.train("user_input.txt")
+    except (UnicodeDecodeError):
+        print("Unable to open file")
