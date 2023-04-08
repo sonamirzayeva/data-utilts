@@ -1,0 +1,74 @@
+Copy code
+import os
+import requests
+from bs4 import BeautifulSoup
+import urllib.request
+import numpy as np
+from scipy.misc import imread, imresize
+import hickle as hkl
+from imageio import imread
+from kitti_settings import *
+
+class SequenceGenerator(object):
+    def __init__(self, data_dir, sequence_length, sequence_stride, batch_size, im_shape=None, shuffle=True, seed=None):
+        self.sequence_length = sequence_length
+        self.sequence_stride = sequence_stride
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.lock = threading.Lock()
+
+        self.X_train, self.y_train, self.X_val, self.y_val = self.load_data(data_dir, im_shape)
+
+        self.possible_starts = range(len(self.X_train) - self.sequence_length - 1)
+
+        self.N_sequences = len(self.possible_starts)
+        super(SequenceGenerator, self).__init__(len(self.possible_starts), batch_size, shuffle, seed)
+
+    def load_data(self, data_dir, im_shape):
+        train_file = os.path.join(data_dir, 'X_train.hkl')
+        train_labels_file = os.path.join(data_dir, 'y_train.hkl')
+        val_file = os.path.join(data_dir, 'X_val.hkl')
+        val_labels_file = os.path.join(data_dir, 'y_val.hkl')
+
+        if not os.path.exists(train_file) or not os.path.exists(train_labels_file) or \
+                not os.path.exists(val_file) or not os.path.exists(val_labels_file):
+            self.preprocess_data(data_dir, im_shape)
+
+        X_train = hkl.load(train_file)
+        y_train = hkl.load(train_labels_file)
+        X_val = hkl.load(val_file)
+        y_val = hkl.load(val_labels_file)
+
+        return X_train, y_train, X_val, y_val
+
+    def preprocess_data(self, data_dir, im_shape):
+        train_file = os.path.join(data_dir, 'X_train.hkl')
+        train_labels_file = os.path.join(data_dir, 'y_train.hkl')
+        val_file = os.path.join(data_dir, 'X_val.hkl')
+        val_labels_file = os.path.join(data_dir, 'y_val.hkl')
+
+        train_folders = [(c, f) for c in categories for f in os.listdir(os.path.join(DATA_DIR, 'raw', c))
+                         if os.path.isdir(os.path.join(DATA_DIR, 'raw', c, f)) and (c, f) not in splits['val'] and
+                         (c, f) not in splits['test']]
+        val_folders = splits['val']
+        test_folders = splits['test']
+
+        X_train, y_train = self.process_data(train_folders, im_shape)
+        X_val, y_val = self.process_data(val_folders, im_shape)
+
+        hkl.dump(X_train, train_file, mode='w')
+        hkl.dump(y_train, train_labels_file, mode='w')
+        hkl.dump(X_val, val_file, mode='w')
+        hkl.dump(y_val, val_labels_file, mode='w')
+
+    def process_data(self, folders, im_shape):
+        X = []
+        y = []
+        for category, folder in folders:
+            im_dir = os.path.join(DATA_DIR, 'raw', category, folder, folder[:10], folder, 'image_03/data/')
+            files = sorted(os.listdir(im_dir))
+
+            for i in range(len(files) - self.sequence_length):
+                X_seq = []
+                for j in range(i, i + self.sequence_length, self.sequence_stride):
+                    im_file = os.path.join(im_dir
