@@ -1,0 +1,128 @@
+import os
+import numpy as np
+from keras.models import model_from_json
+from prednet import PredNet
+from sequence_generator import SequenceGenerator
+
+def convert_model_to_keras2(old_json_file, old_weights_file, new_json_file, new_weights_file):
+    # Load old model and weights
+    with open(old_json_file, 'r') as f:
+        model = model_from_json(f.read(), custom_objects={'PredNet': PredNet})
+    model.load_weights(old_weights_file)
+
+    # Convert weights to Keras 2 format
+    weights = model.layers[1].get_weights()
+    if weights[0].shape[0] == model.layers[1].stack_sizes[1]:
+        for i, w in enumerate(weights):
+            if w.ndim == 4:
+                weights[i] = np.transpose(w, (2, 3, 1, 0))
+        model.layers[1].set_weights(weights)
+
+    # Save new model and weights
+    model.save_weights(new_weights_file)
+    with open(new_json_file, 'w') as f:
+        f.write(model.to_json())
+
+if __name__ == '__main__':
+    # Convert old Keras (1.2) json models and weights to Keras 2.0
+    old_dir = './model_data/'
+    new_dir = './model_data_keras2/'
+    os.makedirs(new_dir, exist_ok=True)
+    for w_tag in ['', '-Lall', '-extrapfinetuned']:
+        m_tag = '' if w_tag == '-Lall' else w_tag
+        convert_model_to_keras2(f'{old_dir}prednet__model{m_tag}.json',
+                                f'{old_dir}prednet__weights{w_tag}.hdf5',
+                                f'{new_dir}prednet__model{m_tag}.json',
+                                f'{new_dir}prednet__weights{w_tag}.hdf5')
+
+    # Create testing model (to output predictions)
+    test_file = 'test_data.hkl'
+    test_sources = 'test_sources.hkl'
+    nt = 10
+    layer_config = train_model.layers[1].get_config()
+    layer_config['output_mode'] = 'prediction'
+    dim_ordering = layer_config['data_format'].replace('tf', 'channels_last')
+    test_prednet = PredNet(weights=train_model.layers[1].get_weights(), **layer_config)
+    input_shape = list(train_model.layers[0].batch_input_shape[1:])
+    input_shape[0] = nt
+    inputs = test_prednet.input
+    predictions = test_prednet.output
+    test_model = test_prednet
+
+    test_generator = SequenceGenerator(test_file, test_sources, nt, sequence_start_mode='unique', data_format=dim_ordering)
+    X_test = test_generator.create_all()
+    X_hat = test_model.predict(X_test, batch_size=1)
+    
+    from keras import backend as K
+from keras.layers import Recurrent, Conv2D, UpSampling2D, MaxPooling2D, Dense, Flatten, TimeDistributed
+from keras.engine import InputSpec
+from keras.models import Model
+from keras.callbacks import ModelCheckpoint
+from keras.optimizers import Adam
+import numpy as np
+
+class PredNet(Recurrent):
+    def __init__(self, stack_sizes, R_stack_sizes,
+                 A_filt_sizes, Ahat_filt_sizes, R_filt_sizes,
+                 pixel_max=1., error_activation='relu', A_activation='relu',
+                 LSTM_activation='tanh', LSTM_inner_activation='hard_sigmoid',
+                 output_mode='error', extrap_start_time=None, data_format=None, **kwargs):
+        
+        super(PredNet, self).__init__(**kwargs)
+
+        self.stack_sizes = stack_sizes
+        self.R_stack_sizes = R_stack_sizes
+        self.A_filt_sizes = A_filt_sizes
+        self.Ahat_filt_sizes = Ahat_filt_sizes
+        self.R_filt_sizes = R_filt_sizes
+        self.pixel_max = pixel_max
+        self.error_activation = activations.get(error_activation)
+        self.A_activation = activations.get(A_activation)
+        self.LSTM_activation = activations.get(LSTM_activation)
+        self.LSTM_inner_activation = activations.get(LSTM_inner_activation)
+        self.output_mode = output_mode
+        self.extrap_start_time = extrap_start_time
+        
+        if data_format is None:
+            data_format = K.image_data_format()
+        assert data_format in {'channels_last', 'channels_first'}
+        self.data_format = data_format
+        if self.data_format == 'channels_first':
+            self.channel_axis = 1
+            self.row_axis = 2
+            self.col_axis = 3
+        else:
+            self.channel_axis = 3
+            self.row_axis = 1
+            self.col_axis = 2
+
+    def build(self, input_shape):
+        self.input_spec = InputSpec(shape=input_shape)
+
+        # Number of frames to predict
+        if self.extrap_start_time is None:
+            self.nt = input_shape[0]
+        else:
+            self.nt = self.extrap_start_time + 1
+
+        self.upl_lstms = []
+        self.downl_lstms = []
+        self.upl_convs = []
+        self.downl_convs = []
+        self.a_convs = []
+        self.ahat_convs = []
+        self.r_convs = []
+        self.a_lstms = []
+        self.r_lstms = []
+
+        # initialize states for hidden layers
+        self.states = [None]*(len(self.stack_sizes)+1)
+        self.states[0] = [None]*2
+        self.states[0][0] = K.zeros((input_shape[0], self.stack_sizes[0], input_shape[self.row_axis], input_shape[self.col_axis]))
+        self.states[0][1] = K.zeros((input_shape[0], self.R_stack_sizes[0], input_shape[self.row_axis], input_shape[self.col_axis]))
+
+        for i in range(1,len(self.stack_sizes)):
+            us = UpSampling2D(size=(2, 2), data_format=self.data_format)
+            dlstm = ConvLSTM2D
+
+    
